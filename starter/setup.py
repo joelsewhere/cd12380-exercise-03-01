@@ -54,7 +54,7 @@ def _generate_orders(date_str: str, n: int = 20) -> list[dict]:
 
 
 @dag
-def setup():
+def setup_s3():
 
     @task
     def seed_s3():
@@ -82,4 +82,4 @@ def setup():
     seed_s3()
 
 
-setup()
+setup_s3()

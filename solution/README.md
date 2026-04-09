@@ -6,11 +6,11 @@ Build an Airflow DAG that moves daily sales transactions from S3 into Redshift.
 
 **1. Configure your S3 bucket**
 
-Open `setup.py` and set `S3_BUCKET` to your assigned bucket name.
+Open `setup_s3.py` and set `S3_BUCKET` to your assigned bucket name.
 
 **2. Run the setup DAG**
 
-Trigger `setup` manually from the Airflow UI. This seeds your S3 bucket with one JSON file per day for the exercise window.
+Trigger `setup_s3` manually from the Airflow UI. This seeds your S3 bucket with one JSON file per day for the exercise window.
 
 **3. Verify**
 

@@ -1,24 +1,30 @@
 # dags/sales_etl.py
 #
+# Airflow 3.1 Exercise — AWS ETL Pipeline
+#
 # Scenario
 # --------
 # Every night the sales platform drops a JSON file of the day's transactions
-# into S3 under a raw prefix. This DAG must:
+# into S3 under a landing prefix. This DAG must:
 #
-#   1. Extract   — read the raw JSON file from S3
-#   2. Transform — clean and reshape the records in Python, then write the
-#                  result back to S3 as CSV under a processed prefix
-#   3. Load      — use S3ToRedshiftOperator to upsert the processed CSV
+#   1. Init      — create the Redshift target schema and table if they don't exist
+#   2. Extract   — move the file from landing to raw, validating it is
+#                  readable JSON in the process
+#   3. Transform — read the raw JSON, clean and reshape the records, then
+#                  write the result back to S3 as CSV under a processed prefix
+#   4. Load      — use S3ToRedshiftOperator to upsert the processed CSV
 #                  into the Redshift production table
 #
-# Using S3 as the intermediate store between transform and load is the
-# standard production pattern for Redshift pipelines. It avoids hitting
-# Redshift row-by-row INSERT limits and makes each stage independently
-# replayable — if the load fails, the processed file is already in S3 and
-# transform does not need to re-run.
+# Using S3 as the intermediate store between every stage is the standard
+# production pattern for Redshift pipelines. It avoids hitting Redshift
+# row-by-row INSERT limits and makes each stage independently replayable —
+# if the load fails, the processed CSV is already in S3 and transform does
+# not need to re-run. If transform fails, the raw JSON is already in S3 and
+# extract does not need to re-run.
 #
 # S3 layout:
-#   raw/transactions/{date}/orders.json        ← written by upstream system
+#   landing/transactions/{date}/orders.json    ← written by upstream system
+#   raw/transactions/{date}/orders.json        ← written by extract task
 #   processed/transactions/{date}/orders.csv   ← written by transform task
 #
 # Redshift table schema:
@@ -33,14 +39,13 @@
 
 from __future__ import annotations
 
-import csv
-import io
 import json
 from datetime import datetime
 
 from airflow.sdk import DAG, task
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.amazon.aws.transfers.s3_to_redshift import S3ToRedshiftOperator
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
 
 # ---------------------------------------------------------------------------
@@ -52,18 +57,11 @@ REDSHIFT_CONN_ID = "redshift_default"
 S3_BUCKET        = "my-sales-bucket"
 REDSHIFT_SCHEMA  = "sales"
 REDSHIFT_TABLE   = "daily_transactions"
-COLUMNS          = ["order_id", "sku", "quantity", "unit_price", "total_revenue"]
-
-
-# ---------------------------------------------------------------------------
-# Helpers (do not modify)
-# ---------------------------------------------------------------------------
-
-def _raw_key(date_str: str) -> str:
-    return f"raw/transactions/{date_str}/orders.json"
-
-def _processed_key(date_str: str) -> str:
-    return f"processed/transactions/{date_str}/orders.csv"
+S3_KEYS = {
+    'landing':   "landing/transactions/{{ ds }}/orders.json",
+    'extract':   "raw/transactions/{{ ds }}/orders.json",
+    'transform': "processed/transactions/{{ ds }}/orders.csv",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -73,37 +71,38 @@ def _processed_key(date_str: str) -> str:
 with DAG(
     dag_id="sales_etl",
     schedule="@daily",
-    start_date=datetime(2024, 1, 1),
+    start_date=datetime(2026, 1, 1),
+    end_date=datetime(2026, 1, 7),
     catchup=False,
-    tags=["exercise", "etl", "aws"],
 ):
 
     # -----------------------------------------------------------------------
     # TASK 1 — extract
     #
-    # Read the raw JSON file from S3 and return its contents as a list of
-    # dicts. Use S3Hook to fetch the file.
+    # Move the raw JSON file from the landing prefix to the raw prefix.
+    # The landing prefix is written by the upstream system and should be
+    # treated as immutable — extract copies the file to raw so that
+    # downstream stages have a stable, pipeline-owned copy to work from.
     #
     # Steps:
     #   - Instantiate S3Hook(aws_conn_id=S3_CONN_ID)
-    #   - Call hook.read_key(key=_raw_key(date_str), bucket_name=S3_BUCKET)
-    #     to get the raw JSON string
-    #   - Parse with json.loads() and return the list
+    #   - Read the file from source_s3_key with hook.read_key()
+    #   - Validate the content is parseable JSON with json.loads()
+    #   - Write the content to dest_s3_key with hook.load_string()
     #
-    # Hint: the logical date string is available as context["ds"].
+    # Returning nothing — transform reads directly from S3 so no XCom
+    # payload is needed between these two tasks.
     # -----------------------------------------------------------------------
 
     @task
-    def extract(**context) -> list[dict]:
+    def extract(source_s3_key, dest_s3_key):
         ### YOUR CODE HERE
-        pass
 
     # -----------------------------------------------------------------------
     # TASK 2 — transform
     #
-    # Receive the raw record list from extract, clean and reshape the records,
-    # then write the result to S3 as CSV. Return the S3 key of the output
-    # file — this is passed to S3ToRedshiftOperator as its s3_key.
+    # Read the raw JSON from S3, clean and reshape the records, then write
+    # the result to S3 as CSV under the processed prefix.
     #
     # Each raw record looks like:
     #   {
@@ -118,26 +117,46 @@ with DAG(
     #   - Cast quantity to int and unit_price to float
     #   - Compute total_revenue = round(quantity * unit_price, 2)
     #   - Drop the "notes" field
-    #   - Keep only the fields in COLUMNS
     #
     # Then write a CSV (with header row) to S3:
-    #   - Build the CSV string in memory using csv.DictWriter and io.StringIO
-    #   - Upload with hook.load_string(
-    #         string_data=...,
-    #         key=_processed_key(date_str),
-    #         bucket_name=S3_BUCKET,
-    #         replace=True,
-    #     )
-    #   - Return _processed_key(date_str)
+    #   - Build the CSV string using pandas DataFrame.to_csv()
+    #   - Upload to dest_s3_key with hook.load_string()
     # -----------------------------------------------------------------------
 
     @task
-    def transform(records: list[dict], **context) -> str:
+    def transform(source_s3_key, dest_s3_key):
         ### YOUR CODE HERE
-        pass
 
     # -----------------------------------------------------------------------
-    # TASK 3 — load
+    # TASK 3 — redshift_init
+    #
+    # Create the target schema and table in Redshift if they don't already
+    # exist. Using CREATE SCHEMA/TABLE IF NOT EXISTS makes this task safe
+    # to run on every DAG execution.
+    # -----------------------------------------------------------------------
+
+    create_schema = SQLExecuteQueryOperator(
+        task_id="create_schema",
+        conn_id=REDSHIFT_CONN_ID,
+        sql=f"CREATE SCHEMA IF NOT EXISTS {REDSHIFT_SCHEMA}",
+    )
+
+    create_table = SQLExecuteQueryOperator(
+        task_id="create_table",
+        conn_id=REDSHIFT_CONN_ID,
+        sql=f"""
+            CREATE TABLE IF NOT EXISTS {REDSHIFT_SCHEMA}.{REDSHIFT_TABLE} (
+                order_id      VARCHAR(255) PRIMARY KEY,
+                sku           VARCHAR(255),
+                quantity      INTEGER,
+                unit_price    NUMERIC(10, 2),
+                total_revenue NUMERIC(10, 2)
+            )
+        """,
+    )
+
+    # -----------------------------------------------------------------------
+    # TASK 4 — load
     #
     # Instantiate an S3ToRedshiftOperator that reads the processed CSV from
     # S3 and upserts it into the Redshift target table.
@@ -147,10 +166,9 @@ with DAG(
     #
     #   task_id          = "load"
     #   s3_bucket        = S3_BUCKET
-    #   s3_key           = _processed_key("{{ ds }}")
+    #   s3_key           = S3_KEYS['transform']
     #   schema           = REDSHIFT_SCHEMA
     #   table            = REDSHIFT_TABLE
-    #   column_list      = COLUMNS
     #   aws_conn_id      = S3_CONN_ID
     #   redshift_conn_id = REDSHIFT_CONN_ID
     #   method           = "UPSERT"
@@ -167,13 +185,12 @@ with DAG(
     # -----------------------------------------------------------------------
     # WIRING
     #
-    # Chain the three tasks so data flows:
-    #   extract → transform → load
+    # Chain all tasks so data flows:
+    #   create_schema → create_table → extract → transform → load
     #
-    # transform receives the list returned by extract.
-    # load must run after transform — use >> to set the dependency since
-    # S3ToRedshiftOperator reads its S3 key from the Jinja-templated
-    # s3_key parameter rather than from XCom.
+    # Each task reads and writes directly from S3, so dependencies are set
+    # with >> rather than passing return values between tasks. This makes
+    # every stage independently replayable from its S3 input.
     # -----------------------------------------------------------------------
 
     ### YOUR CODE HERE
