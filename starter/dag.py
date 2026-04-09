@@ -1,12 +1,8 @@
-# dags/sales_etl.py
-#
-# Airflow 3.1 Exercise — AWS ETL Pipeline
-#
 # Scenario
 # --------
 # Every night the sales platform drops a JSON file of the day's transactions
 # into S3 under a landing prefix. This DAG must:
-#
+
 #   1. Init      — create the Redshift target schema and table if they don't exist
 #   2. Extract   — move the file from landing to raw, validating it is
 #                  readable JSON in the process
@@ -34,10 +30,7 @@
 #   │ order_id     │ sku     │ quantity │ unit_price │ total_revenue │
 #   │ VARCHAR PK   │ VARCHAR │ INTEGER  │ NUMERIC    │ NUMERIC       │
 #   └──────────────┴─────────┴──────────┴────────────┴───────────────┘
-#
-# Read README.md before editing this file.
 
-from __future__ import annotations
 
 import json
 from datetime import datetime
@@ -54,7 +47,7 @@ from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
 S3_CONN_ID       = "aws_default"
 REDSHIFT_CONN_ID = "redshift_default"
-S3_BUCKET        = "my-sales-bucket"
+S3_BUCKET        = NotImplemented ### YOUR CODE HERE
 REDSHIFT_SCHEMA  = "sales"
 REDSHIFT_TABLE   = "daily_transactions"
 S3_KEYS = {
@@ -79,16 +72,7 @@ with DAG(
     # -----------------------------------------------------------------------
     # TASK 1 — extract
     #
-    # Move the raw JSON file from the landing prefix to the raw prefix.
-    # The landing prefix is written by the upstream system and should be
-    # treated as immutable — extract copies the file to raw so that
-    # downstream stages have a stable, pipeline-owned copy to work from.
-    #
-    # Steps:
-    #   - Instantiate S3Hook(aws_conn_id=S3_CONN_ID)
-    #   - Read the file from source_s3_key with hook.read_key()
-    #   - Validate the content is parseable JSON with json.loads()
-    #   - Write the content to dest_s3_key with hook.load_string()
+    # Move the raw JSON file in S3 from the landing prefix to the raw prefix.
     #
     # Returning nothing — transform reads directly from S3 so no XCom
     # payload is needed between these two tasks.
@@ -96,39 +80,72 @@ with DAG(
 
     @task
     def extract(source_s3_key, dest_s3_key):
+        # Instantiate S3Hook
         ### YOUR CODE HERE
+
+        # Read the file from source_s3_key with hook.read_key()
+        ### YOUR CODE HERE
+
+        # Validate the content is parseable JSON with json.loads()
+        ### YOUR CODE HERE
+
+        # Delete the file from the landing S3 directory
+        ### YOUR CODE HERE
+
+        # Write the content to dest_s3_key with hook.load_string()
+        ### YOUR CODE HERE
+
+        pass
 
     # -----------------------------------------------------------------------
     # TASK 2 — transform
     #
     # Read the raw JSON from S3, clean and reshape the records, then write
     # the result to S3 as CSV under the processed prefix.
-    #
-    # Each raw record looks like:
-    #   {
-    #       "order_id":   "ORD-001",
-    #       "sku":        "WGT-A",
-    #       "quantity":   "10",      ← string, cast to int
-    #       "unit_price": "9.99",    ← string, cast to float
-    #       "notes":      "fragile"  ← drop this field
-    #   }
-    #
-    # For each record:
-    #   - Cast quantity to int and unit_price to float
-    #   - Compute total_revenue = round(quantity * unit_price, 2)
-    #   - Drop the "notes" field
-    #
-    # Then write a CSV (with header row) to S3:
-    #   - Build the CSV string using pandas DataFrame.to_csv()
-    #   - Upload to dest_s3_key with hook.load_string()
     # -----------------------------------------------------------------------
-
     @task
     def transform(source_s3_key, dest_s3_key):
+
+        # Instantiate an S3Hook
         ### YOUR CODE HERE
 
+        # Read the file from source_s3_key with hook.read_key()
+        ### YOUR CODE HERE
+
+        # Convert the content to json with json.loads(content)
+        ### YOUR CODE HERE
+
+        cleaned = []
+        
+        # Loop over each record
+        ### YOUR CODE HERE
+
+            # For each record...
+            # 1. Drop the "notes" field
+            # 2. Convert the "quantity" value to an integer
+            # 3. Convert the "unit_price" value to a float
+            # 4. Add a "total_revenue" key that multiplies 
+            #    quantity and unit_price. Round to 2 decimals.
+            # 5. Append the transformed dictionary to `cleaned`
+            # Each raw record looks like:
+            #   {
+            #       "order_id":      "ORD-001",
+            #       "sku":           "WGT-A",
+            #       "quantity":      10,      ← string, cast to int
+            #       "unit_price":    9.99,    ← string, cast to float
+            #       "total_revenue": 99.9
+            #   }
+            ### YOUR CODE HERE
+
+        # Convert the list of dictionaries to a csv string
+        ### YOUR CODE HERE
+
+        # Push the csv to S3 using hook.load_string
+        ### YOUR CODE HERE
+
+
     # -----------------------------------------------------------------------
-    # TASK 3 — redshift_init
+    # redshift_init (No changes needed)
     #
     # Create the target schema and table in Redshift if they don't already
     # exist. Using CREATE SCHEMA/TABLE IF NOT EXISTS makes this task safe
@@ -187,10 +204,6 @@ with DAG(
     #
     # Chain all tasks so data flows:
     #   create_schema → create_table → extract → transform → load
-    #
-    # Each task reads and writes directly from S3, so dependencies are set
-    # with >> rather than passing return values between tasks. This makes
-    # every stage independently replayable from its S3 input.
     # -----------------------------------------------------------------------
 
     ### YOUR CODE HERE

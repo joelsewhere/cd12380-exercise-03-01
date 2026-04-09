@@ -1,7 +1,3 @@
-# dags/sales_etl_solution.py
-#
-# Airflow 3.1 Exercise — AWS ETL Pipeline (SOLUTION)
-#
 # Scenario
 # --------
 # Every night the sales platform drops a JSON file of the day's transactions
@@ -34,10 +30,6 @@
 #   │ order_id     │ sku     │ quantity │ unit_price │ total_revenue │
 #   │ VARCHAR PK   │ VARCHAR │ INTEGER  │ NUMERIC    │ NUMERIC       │
 #   └──────────────┴─────────┴──────────┴────────────┴───────────────┘
-#
-# Read README.md before editing this file.
-
-from __future__ import annotations
 
 import json
 from datetime import datetime
@@ -54,7 +46,7 @@ from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
 S3_CONN_ID       = "aws_default"
 REDSHIFT_CONN_ID = "redshift_default"
-S3_BUCKET        = "my-sales-bucket"
+S3_BUCKET        = NotImplemented ### YOUR CODE HERE
 REDSHIFT_SCHEMA  = "sales"
 REDSHIFT_TABLE   = "daily_transactions"
 S3_KEYS = {
@@ -117,36 +109,37 @@ with DAG(
     #
     # Read the raw JSON from S3, clean and reshape the records, then write
     # the result to S3 as CSV under the processed prefix.
-    #
-    # Each raw record looks like:
-    #   {
-    #       "order_id":   "ORD-001",
-    #       "sku":        "WGT-A",
-    #       "quantity":   "10",      ← string, cast to int
-    #       "unit_price": "9.99",    ← string, cast to float
-    #       "notes":      "fragile"  ← drop this field
-    #   }
-    #
-    # For each record:
-    #   - Cast quantity to int and unit_price to float
-    #   - Compute total_revenue = round(quantity * unit_price, 2)
-    #   - Drop the "notes" field
-    #
-    # Then write a CSV (with header row) to S3:
-    #   - Build the CSV string using pandas DataFrame.to_csv()
-    #   - Upload to dest_s3_key with hook.load_string()
     # -----------------------------------------------------------------------
-
     @task
     def transform(source_s3_key, dest_s3_key):
         import pandas as pd
 
+        # Instantiate an S3Hook
         hook = S3Hook(aws_conn_id=S3_CONN_ID)
+        # Read the file from source_s3_key with hook.read_key()
         content = hook.read_key(key=source_s3_key, bucket_name=S3_BUCKET)
+        # Convert the content to json with json.loads(content)
         records = json.loads(content)
 
         cleaned = []
+
+        # Loop over each record
         for r in records:
+            # For each record...
+            # 1. Drop the "notes" field
+            # 2. Convert the "quantity" value to an integer
+            # 3. Convert the "unit_price" value to a float
+            # 4. Add a "total_revenue" key that multiplies 
+            #    quantity and unit_price. Round to 2 decimals.
+            # 5. Append the transformed dictionary to `cleaned`
+            # Each raw record looks like:
+            #   {
+            #       "order_id":      "ORD-001",
+            #       "sku":           "WGT-A",
+            #       "quantity":      10,      ← string, cast to int
+            #       "unit_price":    9.99,    ← string, cast to float
+            #       "total_revenue": 99.9
+            #   }
             quantity   = int(r["quantity"])
             unit_price = float(r["unit_price"])
             cleaned.append({
@@ -159,6 +152,7 @@ with DAG(
 
         csv = pd.DataFrame(cleaned).to_csv(index=False)
 
+        # Push the csv to S3 using hook.load_string
         hook.load_string(
             string_data=csv,
             key=dest_s3_key,
@@ -168,7 +162,7 @@ with DAG(
         print(f"Wrote {len(cleaned)} records to {dest_s3_key}")
 
     # -----------------------------------------------------------------------
-    # TASK 3 — redshift_init
+    # redshift_init (No changes needed)
     #
     # Create the target schema and table in Redshift if they don't already
     # exist. Using CREATE SCHEMA/TABLE IF NOT EXISTS makes this task safe
@@ -198,11 +192,26 @@ with DAG(
     # -----------------------------------------------------------------------
     # TASK 4 — load
     #
-    # Read the processed CSV from S3 and upsert it into Redshift.
-    # S3ToRedshiftOperator issues a Redshift COPY command under the hood —
-    # no SQL required. method="UPSERT" with upsert_keys=["order_id"] deletes
-    # any existing rows matching on order_id before inserting, making the
-    # load idempotent so backfills and retries are safe.
+    # Instantiate an S3ToRedshiftOperator that reads the processed CSV from
+    # S3 and upserts it into the Redshift target table.
+    #
+    # S3ToRedshiftOperator handles the COPY and upsert logic for you — no
+    # SQL required. Configure it with:
+    #
+    #   task_id          = "load"
+    #   s3_bucket        = S3_BUCKET
+    #   s3_key           = S3_KEYS['transform']
+    #   schema           = REDSHIFT_SCHEMA
+    #   table            = REDSHIFT_TABLE
+    #   aws_conn_id      = S3_CONN_ID
+    #   redshift_conn_id = REDSHIFT_CONN_ID
+    #   method           = "UPSERT"
+    #   upsert_keys      = ["order_id"]
+    #   copy_options     = ["CSV", "IGNOREHEADER 1"]
+    #
+    # method="UPSERT" and upsert_keys tell the operator to delete any
+    # existing rows that match on order_id before inserting, making the
+    # load idempotent.
     # -----------------------------------------------------------------------
 
     load = S3ToRedshiftOperator(
@@ -221,9 +230,8 @@ with DAG(
     # -----------------------------------------------------------------------
     # WIRING
     #
-    # Each task reads and writes directly from S3, so dependencies are set
-    # with >> rather than passing return values between tasks. This makes
-    # every stage independently replayable from its S3 input.
+    # Chain all tasks so data flows:
+    #   create_schema → create_table → extract → transform → load
     # -----------------------------------------------------------------------
 
     create_schema >> create_table >> \
