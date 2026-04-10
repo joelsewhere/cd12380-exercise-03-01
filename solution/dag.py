@@ -39,6 +39,7 @@ from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.amazon.aws.transfers.s3_to_redshift import S3ToRedshiftOperator
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
+S3_BUCKET = NotImplemented ### YOUR CODE HERE
 
 # ---------------------------------------------------------------------------
 # Constants (do not modify)
@@ -46,7 +47,6 @@ from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
 S3_CONN_ID       = "aws_default"
 REDSHIFT_CONN_ID = "redshift_default"
-S3_BUCKET        = NotImplemented ### YOUR CODE HERE
 REDSHIFT_SCHEMA  = "sales"
 REDSHIFT_TABLE   = "daily_transactions"
 S3_KEYS = {
@@ -65,7 +65,8 @@ with DAG(
     schedule="@daily",
     start_date=datetime(2026, 1, 1),
     end_date=datetime(2026, 1, 7),
-    catchup=False,
+    catchup=True,
+    max_active_runs=1,
 ):
 
     # -----------------------------------------------------------------------
