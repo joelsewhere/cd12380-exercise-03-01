@@ -2,10 +2,7 @@
 # It seeds S3 with a fake orders.json file for each day 
 
 # S3 layout written:
-#   landing/transactions/{date}/orders.json   for each date from 2026-01-01
-#                                         to 2026-01-07
-
-from __future__ import annotations
+# landing/transactions/{date}/orders.json for each date from 2026-01-01 to 2026-01-07
 
 import json
 import random
